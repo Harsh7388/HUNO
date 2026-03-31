@@ -4,17 +4,9 @@ const { createServer } = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 
-// Note: In Vercel, we need to import from the compiled files
-// but since this is a serverless function, we might need a different approach.
-// For now, let's keep it simple and ensure the paths are correct relative to the root.
-
-const {
-  createRoom, joinRoom,
-  getRoom,
-  handleDisconnect, getRoomBySocketId,
-  startGame, resetRoom, setStacking, setTeamMode, buildClientState
-} = require('../server/dist/roomManager');
-const { playCard, drawCard, applyColorChoice, applySwapTarget } = require('../server/dist/gameLogic');
+// Import from the local compiled files relative to 'api' directory
+const roomManager = require('../server/dist/roomManager');
+const gameLogic = require('../server/dist/gameLogic');
 
 const app = express();
 app.use(cors());
@@ -22,15 +14,17 @@ app.use(express.json());
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
+  path: '/socket.io/',
+  addTrailingSlash: false,
   cors: { origin: '*', methods: ['GET', 'POST'] }
 });
 
 function broadcastRoom(roomCode) {
-  const room = getRoom(roomCode);
+  const room = roomManager.getRoom(roomCode);
   if (!room) return;
   for (const player of room.gameState.players) {
     if (player.isConnected && player.socketId) {
-      const state = buildClientState(room, player.id);
+      const state = roomManager.buildClientState(room, player.id);
       io.to(player.socketId).emit('game_state', state);
     }
   }
@@ -39,7 +33,7 @@ function broadcastRoom(roomCode) {
 io.on('connection', (socket) => {
   socket.on('create_room', ({ username, playerId }) => {
     try {
-      const room = createRoom(playerId, socket.id, username);
+      const room = roomManager.createRoom(playerId, socket.id, username);
       socket.join(room.code);
       socket.emit('room_created', { roomCode: room.code });
       broadcastRoom(room.code);
@@ -49,7 +43,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('join_room', ({ username, roomCode, playerId }) => {
-    const { room, error } = joinRoom(roomCode.toUpperCase(), playerId, socket.id, username);
+    const { room, error } = roomManager.joinRoom(roomCode.toUpperCase(), playerId, socket.id, username);
     if (error || !room) {
       socket.emit('error', { message: error || 'Failed to join room' });
       return;
@@ -66,7 +60,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('start_game', ({ roomCode }) => {
-    const result = startGame(roomCode, socket.id);
+    const result = roomManager.startGame(roomCode, socket.id);
     if (!result.success) {
       socket.emit('error', { message: result.error });
       return;
@@ -75,11 +69,11 @@ io.on('connection', (socket) => {
   });
 
   socket.on('play_card', ({ cardId }) => {
-    const room = getRoomBySocketId(socket.id);
+    const room = roomManager.getRoomBySocketId(socket.id);
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
     if (!player) return;
-    const result = playCard(room.gameState, player.id, cardId);
+    const result = gameLogic.playCard(room.gameState, player.id, cardId);
     if (!result.success) {
       socket.emit('error', { message: result.error });
       return;
@@ -100,11 +94,11 @@ io.on('connection', (socket) => {
   });
 
   socket.on('draw_card', () => {
-    const room = getRoomBySocketId(socket.id);
+    const room = roomManager.getRoomBySocketId(socket.id);
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
     if (!player) return;
-    const result = drawCard(room.gameState, player.id);
+    const result = gameLogic.drawCard(room.gameState, player.id);
     if (!result.success) {
       socket.emit('error', { message: result.error });
       return;
@@ -114,7 +108,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('call_uno', () => {
-    const room = getRoomBySocketId(socket.id);
+    const room = roomManager.getRoomBySocketId(socket.id);
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
     if (!player) return;
@@ -127,9 +121,9 @@ io.on('connection', (socket) => {
   });
 
   socket.on('color_chosen', ({ color }) => {
-    const room = getRoomBySocketId(socket.id);
+    const room = roomManager.getRoomBySocketId(socket.id);
     if (!room) return;
-    const result = applyColorChoice(room.gameState, color);
+    const result = gameLogic.applyColorChoice(room.gameState, color);
     if (!result.success) {
       socket.emit('error', { message: result.error });
       return;
@@ -138,11 +132,11 @@ io.on('connection', (socket) => {
   });
 
   socket.on('swap_target_chosen', ({ targetId }) => {
-    const room = getRoomBySocketId(socket.id);
+    const room = roomManager.getRoomBySocketId(socket.id);
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
     if (!player) return;
-    const result = applySwapTarget(room.gameState, player.id, targetId);
+    const result = gameLogic.applySwapTarget(room.gameState, player.id, targetId);
     if (!result.success) {
       socket.emit('error', { message: result.error });
       return;
@@ -151,30 +145,30 @@ io.on('connection', (socket) => {
   });
 
   socket.on('toggle_stacking', ({ roomCode, enabled }) => {
-    const room = getRoom(roomCode);
+    const room = roomManager.getRoom(roomCode);
     if (!room || room.hostId !== socket.id) return;
-    setStacking(roomCode, enabled);
+    roomManager.setStacking(roomCode, enabled);
     broadcastRoom(roomCode);
   });
 
   socket.on('toggle_team_mode', ({ roomCode, enabled }) => {
-    const room = getRoom(roomCode);
+    const room = roomManager.getRoom(roomCode);
     if (!room || room.hostId !== socket.id) return;
-    setTeamMode(roomCode, enabled);
+    roomManager.setTeamMode(roomCode, enabled);
     broadcastRoom(roomCode);
   });
 
   socket.on('play_again', ({ roomCode }) => {
-    const room = getRoom(roomCode);
+    const room = roomManager.getRoom(roomCode);
     if (!room) return;
     if (room.gameState.phase !== 'gameover' && room.hostId !== socket.id) return;
-    resetRoom(roomCode);
-    startGame(roomCode, room.hostId);
+    roomManager.resetRoom(roomCode);
+    roomManager.startGame(roomCode, room.hostId);
     broadcastRoom(roomCode);
   });
 
   socket.on('send_message', ({ text }) => {
-    const room = getRoomBySocketId(socket.id);
+    const room = roomManager.getRoomBySocketId(socket.id);
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
     if (!player) return;
@@ -195,7 +189,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    const result = handleDisconnect(socket.id);
+    const result = roomManager.handleDisconnect(socket.id);
     if (result) {
       const { room, playerId } = result;
       const player = room.gameState.players.find(p => p.id === playerId);
@@ -212,4 +206,7 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(clientPath, 'index.html'));
 });
 
-module.exports = app;
+// For Vercel serverless function
+module.exports = (req, res) => {
+  return app(req, res);
+};
