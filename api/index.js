@@ -1,16 +1,20 @@
-import path from 'path';
-import express from 'express';
-import { createServer } from 'http';
-import { Server } from 'socket.io';
-import cors from 'cors';
-import {
+const path = require('path');
+const express = require('express');
+const { createServer } = require('http');
+const { Server } = require('socket.io');
+const cors = require('cors');
+
+// Note: In Vercel, we need to import from the compiled files
+// but since this is a serverless function, we might need a different approach.
+// For now, let's keep it simple and ensure the paths are correct relative to the root.
+
+const {
   createRoom, joinRoom,
   getRoom,
   handleDisconnect, getRoomBySocketId,
   startGame, resetRoom, setStacking, setTeamMode, buildClientState
-} from '../server/src/roomManager';
-import { playCard, drawCard, applyColorChoice, applySwapTarget } from '../server/src/gameLogic';
-import { CardColor } from '../server/src/types';
+} = require('../server/dist/roomManager');
+const { playCard, drawCard, applyColorChoice, applySwapTarget } = require('../server/dist/gameLogic');
 
 const app = express();
 app.use(cors());
@@ -21,7 +25,7 @@ const io = new Server(httpServer, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
 });
 
-function broadcastRoom(roomCode: string) {
+function broadcastRoom(roomCode) {
   const room = getRoom(roomCode);
   if (!room) return;
   for (const player of room.gameState.players) {
@@ -33,7 +37,7 @@ function broadcastRoom(roomCode: string) {
 }
 
 io.on('connection', (socket) => {
-  socket.on('create_room', ({ username, playerId }: { username: string; playerId: string }) => {
+  socket.on('create_room', ({ username, playerId }) => {
     try {
       const room = createRoom(playerId, socket.id, username);
       socket.join(room.code);
@@ -44,7 +48,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('join_room', ({ username, roomCode, playerId }: { username: string; roomCode: string; playerId: string }) => {
+  socket.on('join_room', ({ username, roomCode, playerId }) => {
     const { room, error } = joinRoom(roomCode.toUpperCase(), playerId, socket.id, username);
     if (error || !room) {
       socket.emit('error', { message: error || 'Failed to join room' });
@@ -61,7 +65,7 @@ io.on('connection', (socket) => {
     broadcastRoom(room.code);
   });
 
-  socket.on('start_game', ({ roomCode }: { roomCode: string }) => {
+  socket.on('start_game', ({ roomCode }) => {
     const result = startGame(roomCode, socket.id);
     if (!result.success) {
       socket.emit('error', { message: result.error });
@@ -70,7 +74,7 @@ io.on('connection', (socket) => {
     broadcastRoom(roomCode);
   });
 
-  socket.on('play_card', ({ cardId }: { cardId: string }) => {
+  socket.on('play_card', ({ cardId }) => {
     const room = getRoomBySocketId(socket.id);
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
@@ -122,7 +126,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('color_chosen', ({ color }: { color: CardColor }) => {
+  socket.on('color_chosen', ({ color }) => {
     const room = getRoomBySocketId(socket.id);
     if (!room) return;
     const result = applyColorChoice(room.gameState, color);
@@ -133,7 +137,7 @@ io.on('connection', (socket) => {
     broadcastRoom(room.code);
   });
 
-  socket.on('swap_target_chosen', ({ targetId }: { targetId: string }) => {
+  socket.on('swap_target_chosen', ({ targetId }) => {
     const room = getRoomBySocketId(socket.id);
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
@@ -146,21 +150,21 @@ io.on('connection', (socket) => {
     broadcastRoom(room.code);
   });
 
-  socket.on('toggle_stacking', ({ roomCode, enabled }: { roomCode: string; enabled: boolean }) => {
+  socket.on('toggle_stacking', ({ roomCode, enabled }) => {
     const room = getRoom(roomCode);
     if (!room || room.hostId !== socket.id) return;
     setStacking(roomCode, enabled);
     broadcastRoom(roomCode);
   });
 
-  socket.on('toggle_team_mode', ({ roomCode, enabled }: { roomCode: string; enabled: boolean }) => {
+  socket.on('toggle_team_mode', ({ roomCode, enabled }) => {
     const room = getRoom(roomCode);
     if (!room || room.hostId !== socket.id) return;
     setTeamMode(roomCode, enabled);
     broadcastRoom(roomCode);
   });
 
-  socket.on('play_again', ({ roomCode }: { roomCode: string }) => {
+  socket.on('play_again', ({ roomCode }) => {
     const room = getRoom(roomCode);
     if (!room) return;
     if (room.gameState.phase !== 'gameover' && room.hostId !== socket.id) return;
@@ -169,7 +173,7 @@ io.on('connection', (socket) => {
     broadcastRoom(roomCode);
   });
 
-  socket.on('send_message', ({ text }: { text: string }) => {
+  socket.on('send_message', ({ text }) => {
     const room = getRoomBySocketId(socket.id);
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
@@ -208,4 +212,4 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(clientPath, 'index.html'));
 });
 
-export default app;
+module.exports = app;
