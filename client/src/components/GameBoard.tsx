@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { ClientGameState, CardColor, Card as CardType, ChatMessage } from '../types/game';
 import DiscardPile from './DiscardPile';
@@ -37,6 +37,14 @@ const GameBoard: React.FC<Props> = ({
   onPlayCard, onDrawCard, onCallUno, onChooseColor,
   onChooseSwapTarget, onSendMessage, onToggleStacking, onPlayAgain, onLeaveRoom
 }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(gameState.roomCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   const myId = gameState.myId;
   const isMyTurn = gameState.currentPlayerId === myId;
   const myPlayer = gameState.players.find(p => p.id === myId);
@@ -72,15 +80,21 @@ const GameBoard: React.FC<Props> = ({
           }}>
             HUNO
           </div>
-          <div style={{
-            background: 'rgba(255,255,255,0.07)',
-            border: '1px solid var(--border)',
-            borderRadius: 8, padding: '2px 8px',
-            fontSize: '0.7rem', fontWeight: 700, color: 'var(--muted)',
-            letterSpacing: '0.1em',
-          }}>
-            {gameState.roomCode}
-          </div>
+          <motion.div 
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={handleCopy}
+            title="Click to copy"
+            style={{
+              background: copied ? 'rgba(67, 160, 71, 0.2)' : 'rgba(255,255,255,0.07)',
+              border: copied ? '1px solid #43a047' : '1px solid var(--border)',
+              borderRadius: 8, padding: '2px 8px',
+              fontSize: '0.7rem', fontWeight: 700, color: copied ? '#69f0ae' : 'var(--muted)',
+              letterSpacing: '0.1em', cursor: 'pointer', transition: 'all 0.2s'
+            }}
+          >
+            {copied ? 'COPIED!' : gameState.roomCode}
+          </motion.div>
         </div>
 
         <PlayerList

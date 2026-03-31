@@ -19,6 +19,15 @@ const Lobby: React.FC<Props> = ({
   const [username, setUsername] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [mode, setMode] = useState<'home' | 'create' | 'join'>('home');
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    if (roomCode) {
+      navigator.clipboard.writeText(roomCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   const handle = (fn: () => void) => {
     if (!username.trim()) return;
@@ -44,11 +53,20 @@ const Lobby: React.FC<Props> = ({
             <span style={{ fontSize: '0.7rem', color: 'var(--muted)', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
               Room Code
             </span>
-            <h1 style={{ fontFamily: 'Nunito', fontWeight: 900, fontSize: '3rem', color: '#fff', letterSpacing: '0.15em', margin: '4px 0' }}>
+            <motion.h1 
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={handleCopy}
+              style={{ 
+                fontFamily: 'Nunito', fontWeight: 900, fontSize: '3.1rem', color: '#fff', 
+                letterSpacing: '0.15em', margin: '4px 0', cursor: 'pointer',
+                transition: 'color 0.2s'
+              }}
+            >
               {roomCode}
-            </h1>
-            <p style={{ color: 'var(--accent2)', fontSize: '0.85rem', fontWeight: 600 }}>
-              Share this code with your friends!
+            </motion.h1>
+            <p style={{ color: copied ? '#43a047' : 'var(--accent2)', fontSize: '0.85rem', fontWeight: 700, transition: 'color 0.3s' }}>
+              {copied ? '✅ Code copied to clipboard!' : 'Click code to copy! 📎'}
             </p>
           </div>
 
