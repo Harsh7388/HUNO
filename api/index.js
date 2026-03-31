@@ -4,22 +4,24 @@ const { createServer } = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 
-// Note: Ensure server is built! npm run build in /server
+// Note: Ensure server/dist is built!
 const roomManager = require('../server/dist/roomManager');
 const gameLogic = require('../server/dist/gameLogic');
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
 app.use(express.json());
 
 const httpServer = createServer(app);
+
+// Minimal config for Vercel Serverless
 const io = new Server(httpServer, {
-  path: '/socket.io/',
-  addTrailingSlash: false,
   cors: { origin: '*', methods: ['GET', 'POST'] },
+  transports: ['polling'], // Vercel Serverless functions play better with polling-only
   allowEIO3: true,
+  connectTimeout: 45000,
   pingTimeout: 60000,
-  pingInterval: 25000,
+  pingInterval: 25000
 });
 
 function broadcastRoom(roomCode) {
@@ -34,18 +36,18 @@ function broadcastRoom(roomCode) {
 }
 
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
+  console.log('User connected:', socket.id);
 
   socket.on('create_room', ({ username, playerId }) => {
-    console.log('Creating room for:', username);
+    console.log('create_room event received:', { username, playerId });
     try {
       const room = roomManager.createRoom(playerId, socket.id, username);
       socket.join(room.code);
       socket.emit('room_created', { roomCode: room.code });
       broadcastRoom(room.code);
-      console.log('Room created:', room.code);
+      console.log('Room created successfully:', room.code);
     } catch (e) {
-      console.error('Create room error:', e);
+      console.error('Room creation error:', e);
       socket.emit('error', { message: 'Failed to create room' });
     }
   });
@@ -190,7 +192,8 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', (reason) => {
+    console.log('Client disconnected:', socket.id, 'Reason:', reason);
     const result = roomManager.handleDisconnect(socket.id);
     if (result) {
       const { room, playerId } = result;
@@ -204,12 +207,15 @@ io.on('connection', (socket) => {
 const clientPath = path.join(process.cwd(), 'client/dist');
 app.use(express.static(clientPath));
 
+app.get('/api/health', (_req, res) => res.json({ status: 'ok', serverTime: new Date().toISOString() }));
+
 app.get('*', (_req, res) => {
   res.sendFile(path.join(clientPath, 'index.html'));
 });
 
 // For Vercel serverless function
 module.exports = (req, res) => {
+  // Pass to Socket.IO if necessary
   if (req.url.startsWith('/socket.io/')) {
     return httpServer.emit('request', req, res);
   }
