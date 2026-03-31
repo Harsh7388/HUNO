@@ -4,7 +4,7 @@ const { createServer } = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 
-// Import from the local compiled files relative to 'api' directory
+// Note: Ensure server is built! npm run build in /server
 const roomManager = require('../server/dist/roomManager');
 const gameLogic = require('../server/dist/gameLogic');
 
@@ -16,7 +16,8 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, {
   path: '/socket.io/',
   addTrailingSlash: false,
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: { origin: '*', methods: ['GET', 'POST'] },
+  transports: ['websocket', 'polling']
 });
 
 function broadcastRoom(roomCode) {
@@ -31,13 +32,18 @@ function broadcastRoom(roomCode) {
 }
 
 io.on('connection', (socket) => {
+  console.log('Client connected:', socket.id);
+
   socket.on('create_room', ({ username, playerId }) => {
+    console.log('Creating room for:', username);
     try {
       const room = roomManager.createRoom(playerId, socket.id, username);
       socket.join(room.code);
       socket.emit('room_created', { roomCode: room.code });
       broadcastRoom(room.code);
+      console.log('Room created:', room.code);
     } catch (e) {
+      console.error('Create room error:', e);
       socket.emit('error', { message: 'Failed to create room' });
     }
   });
@@ -50,12 +56,6 @@ io.on('connection', (socket) => {
     }
     socket.join(room.code);
     socket.emit('room_joined', { roomCode: room.code });
-    const isRejoin = room.gameState.phase !== 'lobby';
-    if (!isRejoin) {
-      room.gameState.lastAction = `${username} joined the game!`;
-    } else {
-      room.gameState.lastAction = `${username} reconnected!`;
-    }
     broadcastRoom(room.code);
   });
 
@@ -208,5 +208,8 @@ app.get('*', (_req, res) => {
 
 // For Vercel serverless function
 module.exports = (req, res) => {
+  if (req.url.startsWith('/socket.io/')) {
+    return httpServer.emit('request', req, res);
+  }
   return app(req, res);
 };
