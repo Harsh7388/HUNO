@@ -14,13 +14,13 @@ app.use(express.json());
 
 const httpServer = createServer(app);
 
-// Minimal config for Vercel Serverless
+// Optimizing for Vercel persistence
 const io = new Server(httpServer, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
-  transports: ['polling'], // Vercel Serverless functions play better with polling-only
+  transports: ['polling', 'websocket'], // Allow both for better join stability
   allowEIO3: true,
   connectTimeout: 45000,
-  pingTimeout: 60000,
+  pingTimeout: 120000, // 2 minutes to keep rooms alive
   pingInterval: 25000
 });
 
@@ -36,31 +36,34 @@ function broadcastRoom(roomCode) {
 }
 
 io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
+  console.log('Client connected:', socket.id);
 
   socket.on('create_room', ({ username, playerId }) => {
-    console.log('create_room event received:', { username, playerId });
     try {
       const room = roomManager.createRoom(playerId, socket.id, username);
       socket.join(room.code);
       socket.emit('room_created', { roomCode: room.code });
       broadcastRoom(room.code);
-      console.log('Room created successfully:', room.code);
     } catch (e) {
-      console.error('Room creation error:', e);
       socket.emit('error', { message: 'Failed to create room' });
     }
   });
 
   socket.on('join_room', ({ username, roomCode, playerId }) => {
-    const { room, error } = roomManager.joinRoom(roomCode.toUpperCase(), playerId, socket.id, username);
+    console.log('Join attempt:', { username, roomCode, playerId });
+    const code = roomCode.trim().toUpperCase();
+    const { room, error } = roomManager.joinRoom(code, playerId, socket.id, username);
+    
     if (error || !room) {
-      socket.emit('error', { message: error || 'Failed to join room' });
+      console.log('Join failed:', error || 'Room not found');
+      socket.emit('error', { message: error || 'Room not found' });
       return;
     }
+    
     socket.join(room.code);
     socket.emit('room_joined', { roomCode: room.code });
     broadcastRoom(room.code);
+    console.log('Join successful:', room.code);
   });
 
   socket.on('start_game', ({ roomCode }) => {
@@ -207,7 +210,7 @@ io.on('connection', (socket) => {
 const clientPath = path.join(process.cwd(), 'client/dist');
 app.use(express.static(clientPath));
 
-app.get('/api/health', (_req, res) => res.json({ status: 'ok', serverTime: new Date().toISOString() }));
+app.get('/api/health', (_req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
 app.get('*', (_req, res) => {
   res.sendFile(path.join(clientPath, 'index.html'));
@@ -215,7 +218,6 @@ app.get('*', (_req, res) => {
 
 // For Vercel serverless function
 module.exports = (req, res) => {
-  // Pass to Socket.IO if necessary
   if (req.url.startsWith('/socket.io/')) {
     return httpServer.emit('request', req, res);
   }
