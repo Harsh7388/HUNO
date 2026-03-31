@@ -26,7 +26,7 @@ export function useSocket() {
   });
 
   useEffect(() => {
-    const socket = io(SERVER_URL, { transports: ['websocket'] });
+    const socket = io(SERVER_URL, { transports: ['websocket', 'polling'] });
     socketRef.current = socket;
 
     socket.on('game_state', (state: ClientGameState) => {
