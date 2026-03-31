@@ -45,7 +45,7 @@ export function useSocket() {
       localStorage.setItem('huno_last_room', roomCode);
     });
     
-    // Auto-rejoin on connect
+    /* 
     socket.on('connect', () => {
       const lastRoom = localStorage.getItem('huno_last_room');
       const lastName = localStorage.getItem('huno_last_name');
@@ -53,6 +53,7 @@ export function useSocket() {
         socket.emit('join_room', { username: lastName, roomCode: lastRoom, playerId });
       }
     });
+    */
 
     socket.on('error', ({ message }: { message: string }) => {
       setError(message);
