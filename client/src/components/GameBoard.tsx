@@ -427,6 +427,7 @@ const GameBoard: React.FC<Props> = ({
           winner={gameState.winner}
           isMe={gameState.isTeamMode ? (gameState.winner === `Team ${myPlayer?.team}`) : (gameState.winner === myPlayer?.username)}
           onPlayAgain={onPlayAgain}
+          onGoToDashboard={onLeaveRoom}
         />
       )}
     </div>

@@ -1,12 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 
-interface Props {
-  winner: string;
-  isMe: boolean;
-  onPlayAgain: () => void;
-}
-
 // Simple confetti particle component
 const Confetti: React.FC = () => {
   const colors = ['#e84393', '#fdcb6e', '#00cec9', '#6c5ce7', '#e53935', '#43a047', '#1e88e5', '#fdd835'];
@@ -44,9 +38,10 @@ interface Props {
   winner: string;
   isMe: boolean;
   onPlayAgain: () => void;
+  onGoToDashboard: () => void;
 }
 
-const WinScreen: React.FC<Props> = ({ winner, isMe, onPlayAgain }) => {
+const WinScreen: React.FC<Props> = ({ winner, isMe, onPlayAgain, onGoToDashboard }) => {
   return (
     <>
       <Confetti />
@@ -144,9 +139,27 @@ const WinScreen: React.FC<Props> = ({ winner, isMe, onPlayAgain }) => {
               whileTap={{ scale: 0.96 }}
               onClick={onPlayAgain}
               className="btn btn-primary"
-              style={{ fontSize: '1rem', padding: '14px 32px' }}
+              style={{ fontSize: '1rem', padding: '14px 24px' }}
             >
               🔄 Play Again
+            </motion.button>
+            <motion.button
+              id="go-to-dashboard-btn"
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
+              onClick={onGoToDashboard}
+              className="btn"
+              style={{
+                fontSize: '1rem',
+                padding: '14px 24px',
+                background: 'rgba(255, 255, 255, 0.08)',
+                color: 'var(--text)',
+                border: '1px solid var(--border)',
+                borderRadius: '50px',
+                cursor: 'pointer'
+              }}
+            >
+              🏠 Dashboard
             </motion.button>
           </div>
         </motion.div>

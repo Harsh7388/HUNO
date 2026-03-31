@@ -1,15 +1,16 @@
+import path from 'path';
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import path from 'path';
 import cors from 'cors';
 import {
-  createRoom, joinRoom, removePlayer, startGame,
-  getRoomByPlayerId, buildClientState, setStacking, setTeamMode, resetRoom, getRoom,
-  handleDisconnect, getRoomBySocketId
-} from './roomManager';
-import { playCard, drawCard, applyColorChoice, applySwapTarget } from './gameLogic';
-import { CardColor } from './types';
+  createRoom, joinRoom,
+  getRoom,
+  handleDisconnect, getRoomBySocketId,
+  startGame, resetRoom, setStacking, setTeamMode, buildClientState
+} from '../server/src/roomManager';
+import { playCard, drawCard, applyColorChoice, applySwapTarget } from '../server/src/gameLogic';
+import { CardColor } from '../server/src/types';
 
 const app = express();
 app.use(cors());
@@ -32,9 +33,6 @@ function broadcastRoom(roomCode: string) {
 }
 
 io.on('connection', (socket) => {
-  console.log(`✅ Connected: ${socket.id}`);
-
-  // ─── Create Room ─────────────────────────────────────────────
   socket.on('create_room', ({ username, playerId }: { username: string; playerId: string }) => {
     try {
       const room = createRoom(playerId, socket.id, username);
@@ -46,7 +44,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ─── Join Room ────────────────────────────────────────────────
   socket.on('join_room', ({ username, roomCode, playerId }: { username: string; roomCode: string; playerId: string }) => {
     const { room, error } = joinRoom(roomCode.toUpperCase(), playerId, socket.id, username);
     if (error || !room) {
@@ -55,8 +52,6 @@ io.on('connection', (socket) => {
     }
     socket.join(room.code);
     socket.emit('room_joined', { roomCode: room.code });
-    
-    // Check if it's a reconnection
     const isRejoin = room.gameState.phase !== 'lobby';
     if (!isRejoin) {
       room.gameState.lastAction = `${username} joined the game!`;
@@ -66,7 +61,6 @@ io.on('connection', (socket) => {
     broadcastRoom(room.code);
   });
 
-  // ─── Start Game ───────────────────────────────────────────────
   socket.on('start_game', ({ roomCode }: { roomCode: string }) => {
     const result = startGame(roomCode, socket.id);
     if (!result.success) {
@@ -76,7 +70,6 @@ io.on('connection', (socket) => {
     broadcastRoom(roomCode);
   });
 
-  // ─── Play Card ────────────────────────────────────────────────
   socket.on('play_card', ({ cardId }: { cardId: string }) => {
     const room = getRoomBySocketId(socket.id);
     if (!room) return;
@@ -94,9 +87,7 @@ io.on('connection', (socket) => {
         username: penaltyPlayer?.username
       });
     }
-    if (result.needsColorChoice) {
-      socket.emit('choose_color', {});
-    }
+    if (result.needsColorChoice) socket.emit('choose_color', {});
     if (result.needsSwapTarget) {
       const others = room.gameState.players.filter(p => p.id !== player.id).map(p => ({ id: p.id, username: p.username }));
       socket.emit('choose_swap_target', { players: others });
@@ -104,7 +95,6 @@ io.on('connection', (socket) => {
     broadcastRoom(room.code);
   });
 
-  // ─── Draw Card ────────────────────────────────────────────────
   socket.on('draw_card', () => {
     const room = getRoomBySocketId(socket.id);
     if (!room) return;
@@ -115,13 +105,10 @@ io.on('connection', (socket) => {
       socket.emit('error', { message: result.error });
       return;
     }
-    if (result.canPlay && result.drawn.length > 0) {
-      socket.emit('can_play_drawn', { card: result.drawn[0] });
-    }
+    if (result.canPlay && result.drawn.length > 0) socket.emit('can_play_drawn', { card: result.drawn[0] });
     broadcastRoom(room.code);
   });
 
-  // ─── Call UNO ─────────────────────────────────────────────────
   socket.on('call_uno', () => {
     const room = getRoomBySocketId(socket.id);
     if (!room) return;
@@ -135,7 +122,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ─── Color Chosen ─────────────────────────────────────────────
   socket.on('color_chosen', ({ color }: { color: CardColor }) => {
     const room = getRoomBySocketId(socket.id);
     if (!room) return;
@@ -147,7 +133,6 @@ io.on('connection', (socket) => {
     broadcastRoom(room.code);
   });
 
-  // ─── Swap Target Chosen ───────────────────────────────────────
   socket.on('swap_target_chosen', ({ targetId }: { targetId: string }) => {
     const room = getRoomBySocketId(socket.id);
     if (!room) return;
@@ -161,7 +146,6 @@ io.on('connection', (socket) => {
     broadcastRoom(room.code);
   });
 
-  // ─── Toggle Stacking ──────────────────────────────────────────
   socket.on('toggle_stacking', ({ roomCode, enabled }: { roomCode: string; enabled: boolean }) => {
     const room = getRoom(roomCode);
     if (!room || room.hostId !== socket.id) return;
@@ -169,7 +153,6 @@ io.on('connection', (socket) => {
     broadcastRoom(roomCode);
   });
 
-  // ─── Toggle Team Mode ─────────────────────────────────────────
   socket.on('toggle_team_mode', ({ roomCode, enabled }: { roomCode: string; enabled: boolean }) => {
     const room = getRoom(roomCode);
     if (!room || room.hostId !== socket.id) return;
@@ -177,25 +160,20 @@ io.on('connection', (socket) => {
     broadcastRoom(roomCode);
   });
 
-  // ─── Play Again ───────────────────────────────────────────────
   socket.on('play_again', ({ roomCode }: { roomCode: string }) => {
     const room = getRoom(roomCode);
     if (!room) return;
-    // Anyone in the room can restart if the game is over
     if (room.gameState.phase !== 'gameover' && room.hostId !== socket.id) return;
-    
     resetRoom(roomCode);
-    startGame(roomCode, room.hostId); // Auto-start the game immediately
+    startGame(roomCode, room.hostId);
     broadcastRoom(roomCode);
   });
 
-  // ─── Chat Message ─────────────────────────────────────────────
   socket.on('send_message', ({ text }: { text: string }) => {
     const room = getRoomBySocketId(socket.id);
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
     if (!player) return;
-
     const message = {
       id: Date.now().toString(),
       username: player.username,
@@ -203,21 +181,16 @@ io.on('connection', (socket) => {
       timestamp: Date.now(),
       team: room.gameState.isTeamMode ? player.team : undefined,
     };
-
     if (room.gameState.isTeamMode && player.team) {
       room.gameState.players.forEach(p => {
-        if (p.team === player.team && p.isConnected && p.socketId) {
-          io.to(p.socketId).emit('chat_message', message);
-        }
+        if (p.team === player.team && p.isConnected && p.socketId) io.to(p.socketId).emit('chat_message', message);
       });
     } else {
       io.to(room.code).emit('chat_message', message);
     }
   });
 
-  // ─── Disconnect ───────────────────────────────────────────────
   socket.on('disconnect', () => {
-    console.log(`❌ Disconnected: ${socket.id}`);
     const result = handleDisconnect(socket.id);
     if (result) {
       const { room, playerId } = result;
@@ -228,17 +201,11 @@ io.on('connection', (socket) => {
   });
 });
 
-// Serve Static Assets in Production
-const clientPath = path.join(__dirname, '../../client/dist');
+const clientPath = path.join(process.cwd(), 'client/dist');
 app.use(express.static(clientPath));
 
 app.get('*', (_req, res) => {
   res.sendFile(path.join(clientPath, 'index.html'));
 });
 
-app.get('/health', (_req, res) => res.json({ status: 'ok' }));
-
-const PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, () => {
-  console.log(`🚀 HUNO Server running on http://localhost:${PORT}`);
-});
+export default app;
