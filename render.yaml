@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: huno-game
+    runtime: node
+    plan: free # Change to starter/paid if needed
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: PORT
+        value: 3001
+    autoDeploy: true
