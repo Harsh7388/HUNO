@@ -48,11 +48,16 @@ io.on('connection', (socket) => {
 
   // ─── Join Room ────────────────────────────────────────────────
   socket.on('join_room', ({ username, roomCode, playerId }: { username: string; roomCode: string; playerId: string }) => {
-    const { room, error } = joinRoom(roomCode.toUpperCase(), playerId, socket.id, username);
+    const trimmedCode = roomCode.trim().toUpperCase();
+    console.log(`🔍 Try joining: ${trimmedCode} (from ${username})`);
+    
+    const { room, error } = joinRoom(trimmedCode, playerId, socket.id, username);
     if (error || !room) {
-      socket.emit('error', { message: error || 'Failed to join room' });
+      console.log(`❌ Join failed for ${username}: ${error || 'Room not found'}`);
+      socket.emit('error', { message: error || 'Room not found' });
       return;
     }
+    console.log(`🎯 Joined successfully: ${room.code}`);
     socket.join(room.code);
     socket.emit('room_joined', { roomCode: room.code });
     

@@ -38,7 +38,7 @@ export function createRoom(playerId: string, socketId: string, username: string)
 }
 
 export function joinRoom(code: string, playerId: string, socketId: string, username: string): { room: Room | null; error?: string } {
-  const room = rooms.get(code);
+  const room = rooms.get(code.trim());
   if (!room) return { room: null, error: 'Room not found' };
 
   const existing = room.gameState.players.find(p => p.id === playerId);

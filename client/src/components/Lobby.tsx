@@ -261,11 +261,11 @@ const Lobby: React.FC<Props> = ({
                 className="input"
                 placeholder="Room code"
                 value={joinCode}
-                onChange={e => setJoinCode(e.target.value.toUpperCase())}
+                onChange={e => setJoinCode(e.target.value.trim().toUpperCase())}
                 maxLength={6}
               />
               <button className="btn btn-primary" style={{ width: '100%', padding: '14px' }}
-                onClick={() => handle(() => onJoinRoom(username, joinCode))}>
+                onClick={() => handle(() => onJoinRoom(username, joinCode.trim()))}>
                 🚀 Join Game
               </button>
               <button className="btn" style={{
