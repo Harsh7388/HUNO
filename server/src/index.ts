@@ -73,12 +73,13 @@ io.on('connection', (socket) => {
 
   // ─── Start Game ───────────────────────────────────────────────
   socket.on('start_game', ({ roomCode }: { roomCode: string }) => {
-    const result = startGame(roomCode, socket.id);
+    const trimmedCode = roomCode.trim().toUpperCase();
+    const result = startGame(trimmedCode, socket.id);
     if (!result.success) {
       socket.emit('error', { message: result.error });
       return;
     }
-    broadcastRoom(roomCode);
+    broadcastRoom(trimmedCode);
   });
 
   // ─── Play Card ────────────────────────────────────────────────
@@ -168,30 +169,38 @@ io.on('connection', (socket) => {
 
   // ─── Toggle Stacking ──────────────────────────────────────────
   socket.on('toggle_stacking', ({ roomCode, enabled }: { roomCode: string; enabled: boolean }) => {
-    const room = getRoom(roomCode);
-    if (!room || room.hostId !== socket.id) return;
-    setStacking(roomCode, enabled);
-    broadcastRoom(roomCode);
+    const room = getRoom(roomCode.trim().toUpperCase());
+    if (!room) return;
+    const player = room.gameState.players.find(p => p.socketId === socket.id);
+    if (!player || room.hostId !== player.id) return;
+    
+    setStacking(room.code, enabled);
+    broadcastRoom(room.code);
   });
 
   // ─── Toggle Team Mode ─────────────────────────────────────────
   socket.on('toggle_team_mode', ({ roomCode, enabled }: { roomCode: string; enabled: boolean }) => {
-    const room = getRoom(roomCode);
-    if (!room || room.hostId !== socket.id) return;
-    setTeamMode(roomCode, enabled);
-    broadcastRoom(roomCode);
+    const room = getRoom(roomCode.trim().toUpperCase());
+    if (!room) return;
+    const player = room.gameState.players.find(p => p.socketId === socket.id);
+    if (!player || room.hostId !== player.id) return;
+    
+    setTeamMode(room.code, enabled);
+    broadcastRoom(room.code);
   });
 
   // ─── Play Again ───────────────────────────────────────────────
   socket.on('play_again', ({ roomCode }: { roomCode: string }) => {
-    const room = getRoom(roomCode);
+    const room = getRoom(roomCode.trim().toUpperCase());
     if (!room) return;
-    // Anyone in the room can restart if the game is over
-    if (room.gameState.phase !== 'gameover' && room.hostId !== socket.id) return;
+    const player = room.gameState.players.find(p => p.socketId === socket.id);
+    if (!player) return;
     
-    resetRoom(roomCode);
-    startGame(roomCode, room.hostId); // Auto-start the game immediately
-    broadcastRoom(roomCode);
+    if (room.gameState.phase !== 'gameover' && room.hostId !== player.id) return;
+    
+    resetRoom(room.code);
+    startGame(room.code, socket.id);
+    broadcastRoom(room.code);
   });
 
   // ─── Chat Message ─────────────────────────────────────────────
