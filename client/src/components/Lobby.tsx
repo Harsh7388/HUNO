@@ -35,7 +35,7 @@ const Lobby: React.FC<Props> = ({
     fn();
   };
 
-  const isHost = gameState && gameState.players[0]?.id === gameState.myId;
+  const isHost = gameState && gameState.hostId === gameState.myId;
 
   // Waiting Room View
   if (roomCode && gameState) {

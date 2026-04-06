@@ -6,7 +6,7 @@ import cors from 'cors';
 import {
   createRoom, joinRoom, removePlayer, startGame,
   getRoomByPlayerId, buildClientState, setStacking, setTeamMode, resetRoom, getRoom,
-  handleDisconnect, getRoomBySocketId
+  handleDisconnect, getRoomBySocketId, updateSocketId
 } from './roomManager';
 import { playCard, drawCard, applyColorChoice, applySwapTarget } from './gameLogic';
 import { CardColor } from './types';
@@ -17,9 +17,13 @@ app.use(express.json());
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: { origin: '*', methods: ['GET', 'POST'] },
+  // Allow polling → websocket upgrade (required for Render's reverse proxy)
+  transports: ['polling', 'websocket'],
+  allowUpgrades: true,
 });
 
+// ─── Helper: broadcast updated game state to all connected players ─────────────
 function broadcastRoom(roomCode: string) {
   const room = getRoom(roomCode);
   if (!room) return;
@@ -31,10 +35,35 @@ function broadcastRoom(roomCode: string) {
   }
 }
 
+// ─── Helper: refresh socket ID mapping then look up room ──────────────────────
+// Every client event includes its persistent playerId so we can keep the
+// server's socketId mapping fresh even after reconnects / transport upgrades.
+function refreshAndGetRoom(socketId: string, playerId?: string): ReturnType<typeof getRoomBySocketId> {
+  if (playerId) {
+    updateSocketId(playerId, socketId);
+  }
+  return getRoomBySocketId(socketId);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`✅ Connected: ${socket.id}`);
 
-  // ─── Create Room ─────────────────────────────────────────────
+  // ─── Register / Reconnect ─────────────────────────────────────────────
+  // Called by client on every connect/reconnect so stale socketIds are fixed.
+  socket.on('register', ({ playerId }: { playerId: string }) => {
+    const updated = updateSocketId(playerId, socket.id);
+    if (updated) {
+      const room = getRoomBySocketId(socket.id);
+      if (room) {
+        socket.join(room.code);
+        console.log(`🔄 Re-registered ${playerId} → ${socket.id} in room ${room.code}`);
+        broadcastRoom(room.code);
+      }
+    }
+  });
+
+  // ─── Create Room ─────────────────────────────────────────────────────
   socket.on('create_room', ({ username, playerId }: { username: string; playerId: string }) => {
     try {
       const room = createRoom(playerId, socket.id, username);
@@ -46,45 +75,47 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ─── Join Room ────────────────────────────────────────────────
+  // ─── Join Room ────────────────────────────────────────────────────────
   socket.on('join_room', ({ username, roomCode, playerId }: { username: string; roomCode: string; playerId: string }) => {
     const trimmedCode = roomCode.trim().toUpperCase();
-    console.log(`🔍 Try joining: ${trimmedCode} (from ${username})`);
-    
+    console.log(`🔍 Try joining: ${trimmedCode} (${username} / ${playerId})`);
+
     const { room, error } = joinRoom(trimmedCode, playerId, socket.id, username);
     if (error || !room) {
       console.log(`❌ Join failed for ${username}: ${error || 'Room not found'}`);
       socket.emit('error', { message: error || 'Room not found' });
       return;
     }
-    console.log(`🎯 Joined successfully: ${room.code}`);
+    console.log(`🎯 Joined: ${room.code}`);
     socket.join(room.code);
     socket.emit('room_joined', { roomCode: room.code });
-    
-    // Check if it's a reconnection
+
     const isRejoin = room.gameState.phase !== 'lobby';
-    if (!isRejoin) {
-      room.gameState.lastAction = `${username} joined the game!`;
-    } else {
-      room.gameState.lastAction = `${username} reconnected!`;
-    }
+    room.gameState.lastAction = isRejoin
+      ? `${username} reconnected!`
+      : `${username} joined the game!`;
     broadcastRoom(room.code);
   });
 
-  // ─── Start Game ───────────────────────────────────────────────
-  socket.on('start_game', ({ roomCode }: { roomCode: string }) => {
+  // ─── Start Game ───────────────────────────────────────────────────────
+  socket.on('start_game', ({ roomCode, playerId }: { roomCode: string; playerId?: string }) => {
     const trimmedCode = roomCode.trim().toUpperCase();
-    const result = startGame(trimmedCode, socket.id);
+    // Refresh socketId mapping so stale IDs don't block the host check
+    if (playerId) updateSocketId(playerId, socket.id);
+
+    const result = startGame(trimmedCode, socket.id, playerId);
     if (!result.success) {
+      console.log(`❌ Start game failed: ${result.error}`);
       socket.emit('error', { message: result.error });
       return;
     }
+    console.log(`🎮 Game started in room ${trimmedCode}`);
     broadcastRoom(trimmedCode);
   });
 
-  // ─── Play Card ────────────────────────────────────────────────
-  socket.on('play_card', ({ cardId }: { cardId: string }) => {
-    const room = getRoomBySocketId(socket.id);
+  // ─── Play Card ────────────────────────────────────────────────────────
+  socket.on('play_card', ({ cardId, playerId }: { cardId: string; playerId?: string }) => {
+    const room = refreshAndGetRoom(socket.id, playerId);
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
     if (!player) return;
@@ -100,19 +131,19 @@ io.on('connection', (socket) => {
         username: penaltyPlayer?.username
       });
     }
-    if (result.needsColorChoice) {
-      socket.emit('choose_color', {});
-    }
+    if (result.needsColorChoice) socket.emit('choose_color', {});
     if (result.needsSwapTarget) {
-      const others = room.gameState.players.filter(p => p.id !== player.id).map(p => ({ id: p.id, username: p.username }));
+      const others = room.gameState.players
+        .filter(p => p.id !== player.id)
+        .map(p => ({ id: p.id, username: p.username }));
       socket.emit('choose_swap_target', { players: others });
     }
     broadcastRoom(room.code);
   });
 
-  // ─── Draw Card ────────────────────────────────────────────────
-  socket.on('draw_card', () => {
-    const room = getRoomBySocketId(socket.id);
+  // ─── Draw Card ────────────────────────────────────────────────────────
+  socket.on('draw_card', ({ playerId }: { playerId?: string } = {}) => {
+    const room = refreshAndGetRoom(socket.id, playerId);
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
     if (!player) return;
@@ -127,9 +158,9 @@ io.on('connection', (socket) => {
     broadcastRoom(room.code);
   });
 
-  // ─── Call UNO ─────────────────────────────────────────────────
-  socket.on('call_uno', () => {
-    const room = getRoomBySocketId(socket.id);
+  // ─── Call UNO ─────────────────────────────────────────────────────────
+  socket.on('call_uno', ({ playerId }: { playerId?: string } = {}) => {
+    const room = refreshAndGetRoom(socket.id, playerId);
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
     if (!player) return;
@@ -141,9 +172,9 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ─── Color Chosen ─────────────────────────────────────────────
-  socket.on('color_chosen', ({ color }: { color: CardColor }) => {
-    const room = getRoomBySocketId(socket.id);
+  // ─── Color Chosen ─────────────────────────────────────────────────────
+  socket.on('color_chosen', ({ color, playerId }: { color: CardColor; playerId?: string }) => {
+    const room = refreshAndGetRoom(socket.id, playerId);
     if (!room) return;
     const result = applyColorChoice(room.gameState, color);
     if (!result.success) {
@@ -153,9 +184,9 @@ io.on('connection', (socket) => {
     broadcastRoom(room.code);
   });
 
-  // ─── Swap Target Chosen ───────────────────────────────────────
-  socket.on('swap_target_chosen', ({ targetId }: { targetId: string }) => {
-    const room = getRoomBySocketId(socket.id);
+  // ─── Swap Target Chosen ───────────────────────────────────────────────
+  socket.on('swap_target_chosen', ({ targetId, playerId }: { targetId: string; playerId?: string }) => {
+    const room = refreshAndGetRoom(socket.id, playerId);
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
     if (!player) return;
@@ -167,45 +198,44 @@ io.on('connection', (socket) => {
     broadcastRoom(room.code);
   });
 
-  // ─── Toggle Stacking ──────────────────────────────────────────
-  socket.on('toggle_stacking', ({ roomCode, enabled }: { roomCode: string; enabled: boolean }) => {
+  // ─── Toggle Stacking ──────────────────────────────────────────────────
+  socket.on('toggle_stacking', ({ roomCode, enabled, playerId }: { roomCode: string; enabled: boolean; playerId?: string }) => {
+    if (playerId) updateSocketId(playerId, socket.id);
     const room = getRoom(roomCode.trim().toUpperCase());
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
     if (!player || room.hostId !== player.id) return;
-    
     setStacking(room.code, enabled);
     broadcastRoom(room.code);
   });
 
-  // ─── Toggle Team Mode ─────────────────────────────────────────
-  socket.on('toggle_team_mode', ({ roomCode, enabled }: { roomCode: string; enabled: boolean }) => {
+  // ─── Toggle Team Mode ─────────────────────────────────────────────────
+  socket.on('toggle_team_mode', ({ roomCode, enabled, playerId }: { roomCode: string; enabled: boolean; playerId?: string }) => {
+    if (playerId) updateSocketId(playerId, socket.id);
     const room = getRoom(roomCode.trim().toUpperCase());
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
     if (!player || room.hostId !== player.id) return;
-    
     setTeamMode(room.code, enabled);
     broadcastRoom(room.code);
   });
 
-  // ─── Play Again ───────────────────────────────────────────────
-  socket.on('play_again', ({ roomCode }: { roomCode: string }) => {
+  // ─── Play Again ───────────────────────────────────────────────────────
+  socket.on('play_again', ({ roomCode, playerId }: { roomCode: string; playerId?: string }) => {
+    if (playerId) updateSocketId(playerId, socket.id);
     const room = getRoom(roomCode.trim().toUpperCase());
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
     if (!player) return;
-    
     if (room.gameState.phase !== 'gameover' && room.hostId !== player.id) return;
-    
     resetRoom(room.code);
-    startGame(room.code, socket.id);
+    startGame(room.code, socket.id, player.id);
     broadcastRoom(room.code);
   });
 
-  // ─── Chat Message ─────────────────────────────────────────────
-  socket.on('send_message', ({ text }: { text: string }) => {
-    const room = getRoomBySocketId(socket.id);
+  // ─── Chat Message ─────────────────────────────────────────────────────
+  socket.on('send_message', ({ text, playerId }: { text: string; playerId?: string }) => {
+    const room = refreshAndGetRoom(socket.id, playerId);
     if (!room) return;
     const player = room.gameState.players.find(p => p.socketId === socket.id);
     if (!player) return;
@@ -229,7 +259,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ─── Disconnect ───────────────────────────────────────────────
+  // ─── Disconnect ───────────────────────────────────────────────────────
   socket.on('disconnect', () => {
     console.log(`❌ Disconnected: ${socket.id}`);
     const result = handleDisconnect(socket.id);
@@ -242,15 +272,13 @@ io.on('connection', (socket) => {
   });
 });
 
-// Serve Static Assets in Production
+// ─── Serve Static Client in Production ────────────────────────────────────────
 const clientPath = path.join(__dirname, '../../client/dist');
 app.use(express.static(clientPath));
-
+app.get('/health', (_req, res) => res.json({ status: 'ok', rooms: 'active' }));
 app.get('*', (_req, res) => {
   res.sendFile(path.join(clientPath, 'index.html'));
 });
-
-app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {

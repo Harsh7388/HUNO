@@ -4,6 +4,19 @@ import { shuffle } from './deck';
 
 const rooms = new Map<string, Room>();
 
+// ─── Update socket ID mapping when a player reconnects ────────────────────────
+export function updateSocketId(playerId: string, newSocketId: string): boolean {
+  for (const room of rooms.values()) {
+    const player = room.gameState.players.find(p => p.id === playerId);
+    if (player) {
+      player.socketId = newSocketId;
+      player.isConnected = true;
+      return true;
+    }
+  }
+  return false;
+}
+
 function genCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
@@ -114,20 +127,24 @@ export function getRoomBySocketId(socketId: string): Room | undefined {
   return undefined;
 }
 
-export function startGame(code: string, socketId: string): { success: boolean; error?: string } {
+export function startGame(code: string, socketId: string, playerId?: string): { success: boolean; error?: string } {
   const room = rooms.get(code);
   if (!room) return { success: false, error: 'Room not found' };
-  const player = room.gameState.players.find(p => p.socketId === socketId);
+
+  // Find player by socketId first; fall back to playerId if socketId is stale
+  let player = room.gameState.players.find(p => p.socketId === socketId);
+  if (!player && playerId) {
+    player = room.gameState.players.find(p => p.id === playerId);
+    if (player) player.socketId = socketId; // refresh the stale mapping
+  }
+
   if (!player || room.hostId !== player.id) return { success: false, error: 'Only the host can start the game' };
   if (room.gameState.players.length < 2) return { success: false, error: 'Need at least 2 players' };
   if (room.gameState.phase !== 'lobby') return { success: false, error: 'Game already started' };
 
   if (room.gameState.isTeamMode) {
-    // Shuffle players and assign teams A/B alternately
     const shuffled = shuffle(room.gameState.players);
-    shuffled.forEach((p, i) => {
-      p.team = i % 2 === 0 ? 'A' : 'B';
-    });
+    shuffled.forEach((p, i) => { p.team = i % 2 === 0 ? 'A' : 'B'; });
     room.gameState.players = shuffled;
   }
 

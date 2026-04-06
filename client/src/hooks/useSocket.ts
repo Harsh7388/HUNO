@@ -2,7 +2,10 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { ClientGameState, ChatMessage, CardColor } from '../types/game';
 
-const SERVER_URL = window.location.hostname === 'localhost' ? 'http://localhost:3001' : window.location.origin;
+const SERVER_URL =
+  window.location.hostname === 'localhost'
+    ? 'http://localhost:3001'
+    : window.location.origin;
 
 export function useSocket() {
   const socketRef = useRef<Socket | null>(null);
@@ -17,7 +20,7 @@ export function useSocket() {
   const [unoPenalty, setUnoPenalty] = useState<{ username: string } | null>(null);
   const [unoCalled, setUnoCalled] = useState<{ username: string } | null>(null);
 
-  // Persistent Player ID
+  // Stable persistent player ID (survives page reloads)
   const [playerId] = useState(() => {
     const saved = localStorage.getItem('huno_player_id');
     if (saved) return saved;
@@ -26,149 +29,196 @@ export function useSocket() {
     return newId;
   });
 
+  // Keep a ref so callbacks can always access the latest playerId / roomCode
+  const playerIdRef = useRef(playerId);
+  const roomCodeRef = useRef<string | null>(null);
+  useEffect(() => { roomCodeRef.current = roomCode; }, [roomCode]);
+
   useEffect(() => {
-    // Use polling first then upgrade to websocket — required for Render's proxy
+    // Start with polling then upgrade to WebSocket — required for Render's proxy
     const socket = io(SERVER_URL, {
       transports: ['polling', 'websocket'],
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1500,
+      reconnectionAttempts: 15,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
       timeout: 20000,
     });
     socketRef.current = socket;
 
+    // ── Connection lifecycle ──────────────────────────────────────────────
     socket.on('connect', () => {
       console.log('✅ Socket connected:', socket.id);
       setConnected(true);
-    });
-    socket.on('disconnect', () => {
-      console.log('❌ Socket disconnected');
-      setConnected(false);
-    });
-    socket.on('connect_error', (err) => {
-      console.error('Socket connect error:', err.message);
+
+      // Always register with the server so stale socketIds get refreshed.
+      // If we were in a room, this also lets the server fix its mapping.
+      socket.emit('register', { playerId: playerIdRef.current });
+
+      // Auto-rejoin if the player was already in a room (handles reconnects)
+      const lastRoom = localStorage.getItem('huno_last_room');
+      const lastName = localStorage.getItem('huno_last_name');
+      if (lastRoom && lastName) {
+        console.log('🔄 Auto-rejoining room:', lastRoom);
+        socket.emit('join_room', {
+          username: lastName,
+          roomCode: lastRoom,
+          playerId: playerIdRef.current,
+        });
+      }
     });
 
+    socket.on('disconnect', (reason) => {
+      console.log('❌ Socket disconnected:', reason);
+      setConnected(false);
+    });
+
+    socket.on('connect_error', (err) => {
+      console.error('Socket connect_error:', err.message);
+    });
+
+    // ── Game events ──────────────────────────────────────────────────────
     socket.on('game_state', (state: ClientGameState) => {
       setGameState(state);
       setRoomCode(state.roomCode);
+      roomCodeRef.current = state.roomCode;
     });
-    socket.on('room_created', ({ roomCode }: { roomCode: string }) => {
-      setRoomCode(roomCode);
-      localStorage.setItem('huno_last_room', roomCode);
+
+    socket.on('room_created', ({ roomCode: rc }: { roomCode: string }) => {
+      setRoomCode(rc);
+      roomCodeRef.current = rc;
+      localStorage.setItem('huno_last_room', rc);
     });
-    socket.on('room_joined', ({ roomCode }: { roomCode: string }) => {
-      setRoomCode(roomCode);
-      localStorage.setItem('huno_last_room', roomCode);
+
+    socket.on('room_joined', ({ roomCode: rc }: { roomCode: string }) => {
+      setRoomCode(rc);
+      roomCodeRef.current = rc;
+      localStorage.setItem('huno_last_room', rc);
     });
 
     socket.on('error', ({ message }: { message: string }) => {
+      console.warn('Server error:', message);
       setError(message);
       if (message === 'Room not found') {
         localStorage.removeItem('huno_last_room');
         setRoomCode(null);
+        roomCodeRef.current = null;
         setGameState(null);
       }
       setTimeout(() => setError(null), 4000);
     });
+
     socket.on('chat_message', (msg: ChatMessage) => {
       setMessages(prev => [...prev.slice(-99), msg]);
     });
+
     socket.on('choose_color', () => setNeedColorChoice(true));
+
     socket.on('choose_swap_target', ({ players }: { players: { id: string; username: string }[] }) => {
       setSwapTargets(players);
     });
+
     socket.on('can_play_drawn', (data: { card: import('../types/game').Card }) => {
       setCanPlayDrawn(data);
       setTimeout(() => setCanPlayDrawn(null), 8000);
     });
+
     socket.on('uno_penalty', ({ username }: { username: string }) => {
       setUnoPenalty({ username });
       setTimeout(() => setUnoPenalty(null), 3000);
     });
+
     socket.on('uno_called', ({ username }: { username: string }) => {
       setUnoCalled({ username });
       setTimeout(() => setUnoCalled(null), 2500);
     });
 
     return () => { socket.disconnect(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Helpers ────────────────────────────────────────────────────────────
+  const emit = useCallback((event: string, data: Record<string, unknown> = {}) => {
+    const socket = socketRef.current;
+    if (!socket?.connected) {
+      setError('Not connected — please wait a moment and try again.');
+      setTimeout(() => setError(null), 4000);
+      return false;
+    }
+    socket.emit(event, { ...data, playerId: playerIdRef.current });
+    return true;
   }, []);
 
+  // ── Actions ────────────────────────────────────────────────────────────
   const createRoom = useCallback((username: string) => {
-    if (!socketRef.current?.connected) {
-      setError('Still connecting to server... please try again.');
-      setTimeout(() => setError(null), 4000);
-      return;
-    }
     localStorage.setItem('huno_last_name', username);
-    socketRef.current.emit('create_room', { username, playerId });
-  }, [playerId]);
+    emit('create_room', { username });
+  }, [emit]);
 
   const joinRoom = useCallback((username: string, code: string) => {
-    if (!socketRef.current?.connected) {
-      setError('Still connecting to server... please try again.');
-      setTimeout(() => setError(null), 4000);
-      return;
-    }
     localStorage.setItem('huno_last_name', username);
-    socketRef.current.emit('join_room', { username, roomCode: code.trim().toUpperCase(), playerId });
-  }, [playerId]);
+    emit('join_room', { username, roomCode: code.trim().toUpperCase() });
+  }, [emit]);
 
   const startGame = useCallback(() => {
-    if (roomCode) socketRef.current?.emit('start_game', { roomCode });
-  }, [roomCode]);
+    const rc = roomCodeRef.current;
+    if (rc) emit('start_game', { roomCode: rc });
+  }, [emit]);
 
   const playCard = useCallback((cardId: string) => {
-    socketRef.current?.emit('play_card', { cardId });
+    emit('play_card', { cardId });
     setCanPlayDrawn(null);
-  }, []);
+  }, [emit]);
 
   const drawCard = useCallback(() => {
-    socketRef.current?.emit('draw_card');
-  }, []);
+    emit('draw_card');
+  }, [emit]);
 
   const callUno = useCallback(() => {
-    socketRef.current?.emit('call_uno');
-  }, []);
+    emit('call_uno');
+  }, [emit]);
 
   const chooseColor = useCallback((color: CardColor) => {
-    socketRef.current?.emit('color_chosen', { color });
+    emit('color_chosen', { color });
     setNeedColorChoice(false);
-  }, []);
+  }, [emit]);
 
   const chooseSwapTarget = useCallback((targetId: string) => {
-    socketRef.current?.emit('swap_target_chosen', { targetId });
+    emit('swap_target_chosen', { targetId });
     setSwapTargets(null);
-  }, []);
+  }, [emit]);
 
   const sendMessage = useCallback((text: string) => {
-    socketRef.current?.emit('send_message', { text });
-  }, []);
+    emit('send_message', { text });
+  }, [emit]);
 
   const toggleStacking = useCallback((enabled: boolean) => {
-    if (roomCode) socketRef.current?.emit('toggle_stacking', { roomCode, enabled });
-  }, [roomCode]);
+    const rc = roomCodeRef.current;
+    if (rc) emit('toggle_stacking', { roomCode: rc, enabled });
+  }, [emit]);
 
   const toggleTeamMode = useCallback((enabled: boolean) => {
-    if (roomCode) socketRef.current?.emit('toggle_team_mode', { roomCode, enabled });
-  }, [roomCode]);
+    const rc = roomCodeRef.current;
+    if (rc) emit('toggle_team_mode', { roomCode: rc, enabled });
+  }, [emit]);
 
   const playAgain = useCallback(() => {
-    if (roomCode) socketRef.current?.emit('play_again', { roomCode });
-  }, [roomCode]);
+    const rc = roomCodeRef.current;
+    if (rc) emit('play_again', { roomCode: rc });
+  }, [emit]);
 
   const leaveRoom = useCallback(() => {
     localStorage.removeItem('huno_last_room');
     setRoomCode(null);
+    roomCodeRef.current = null;
     setGameState(null);
-    window.location.reload(); // Hard reset
+    window.location.reload();
   }, []);
 
-  const myId = playerId;
-
   return {
-    connected, gameState, roomCode, error, messages, needColorChoice, swapTargets,
-    canPlayDrawn, unoPenalty, unoCalled, myId,
+    connected, gameState, roomCode, error, messages,
+    needColorChoice, swapTargets, canPlayDrawn, unoPenalty, unoCalled,
+    myId: playerId,
     createRoom, joinRoom, startGame, playCard, drawCard, callUno,
-    chooseColor, chooseSwapTarget, sendMessage, toggleStacking, toggleTeamMode, playAgain, leaveRoom,
+    chooseColor, chooseSwapTarget, sendMessage, toggleStacking, toggleTeamMode,
+    playAgain, leaveRoom,
   };
 }
