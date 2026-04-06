@@ -6,6 +6,7 @@ const SERVER_URL = window.location.hostname === 'localhost' ? 'http://localhost:
 
 export function useSocket() {
   const socketRef = useRef<Socket | null>(null);
+  const [connected, setConnected] = useState(false);
   const [gameState, setGameState] = useState<ClientGameState | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,11 +27,26 @@ export function useSocket() {
   });
 
   useEffect(() => {
+    // Use polling first then upgrade to websocket — required for Render's proxy
     const socket = io(SERVER_URL, {
-      reconnectionAttempts: 5,
-      reconnectionDelay: 2000,
+      transports: ['polling', 'websocket'],
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1500,
+      timeout: 20000,
     });
     socketRef.current = socket;
+
+    socket.on('connect', () => {
+      console.log('✅ Socket connected:', socket.id);
+      setConnected(true);
+    });
+    socket.on('disconnect', () => {
+      console.log('❌ Socket disconnected');
+      setConnected(false);
+    });
+    socket.on('connect_error', (err) => {
+      console.error('Socket connect error:', err.message);
+    });
 
     socket.on('game_state', (state: ClientGameState) => {
       setGameState(state);
@@ -44,16 +60,6 @@ export function useSocket() {
       setRoomCode(roomCode);
       localStorage.setItem('huno_last_room', roomCode);
     });
-    
-    /* 
-    socket.on('connect', () => {
-      const lastRoom = localStorage.getItem('huno_last_room');
-      const lastName = localStorage.getItem('huno_last_name');
-      if (lastRoom && lastName) {
-        socket.emit('join_room', { username: lastName, roomCode: lastRoom, playerId });
-      }
-    });
-    */
 
     socket.on('error', ({ message }: { message: string }) => {
       setError(message);
@@ -88,13 +94,23 @@ export function useSocket() {
   }, []);
 
   const createRoom = useCallback((username: string) => {
+    if (!socketRef.current?.connected) {
+      setError('Still connecting to server... please try again.');
+      setTimeout(() => setError(null), 4000);
+      return;
+    }
     localStorage.setItem('huno_last_name', username);
-    socketRef.current?.emit('create_room', { username, playerId });
+    socketRef.current.emit('create_room', { username, playerId });
   }, [playerId]);
 
   const joinRoom = useCallback((username: string, code: string) => {
+    if (!socketRef.current?.connected) {
+      setError('Still connecting to server... please try again.');
+      setTimeout(() => setError(null), 4000);
+      return;
+    }
     localStorage.setItem('huno_last_name', username);
-    socketRef.current?.emit('join_room', { username, roomCode: code, playerId });
+    socketRef.current.emit('join_room', { username, roomCode: code.trim().toUpperCase(), playerId });
   }, [playerId]);
 
   const startGame = useCallback(() => {
@@ -150,7 +166,7 @@ export function useSocket() {
   const myId = playerId;
 
   return {
-    gameState, roomCode, error, messages, needColorChoice, swapTargets,
+    connected, gameState, roomCode, error, messages, needColorChoice, swapTargets,
     canPlayDrawn, unoPenalty, unoCalled, myId,
     createRoom, joinRoom, startGame, playCard, drawCard, callUno,
     chooseColor, chooseSwapTarget, sendMessage, toggleStacking, toggleTeamMode, playAgain, leaveRoom,

@@ -6,7 +6,7 @@ import './index.css';
 
 function App() {
   const {
-    gameState, roomCode, error, messages,
+    connected, gameState, roomCode, error, messages,
     needColorChoice, swapTargets, canPlayDrawn,
     unoPenalty, unoCalled,
     createRoom, joinRoom, startGame,
@@ -63,6 +63,7 @@ function App() {
               onToggleTeamMode={toggleTeamMode}
               onLeaveRoom={leaveRoom}
               error={error}
+              connected={connected}
             />
           </motion.div>
         ) : (

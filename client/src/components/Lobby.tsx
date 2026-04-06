@@ -11,10 +11,11 @@ interface Props {
   onToggleTeamMode: (enabled: boolean) => void;
   onLeaveRoom: () => void;
   error: string | null;
+  connected: boolean;
 }
 
-const Lobby: React.FC<Props> = ({ 
-  roomCode, gameState, onCreateRoom, onJoinRoom, onStartGame, onToggleTeamMode, onLeaveRoom, error 
+const Lobby: React.FC<Props> = ({
+  roomCode, gameState, onCreateRoom, onJoinRoom, onStartGame, onToggleTeamMode, onLeaveRoom, error, connected
 }) => {
   const [username, setUsername] = useState('');
   const [joinCode, setJoinCode] = useState('');
@@ -53,12 +54,12 @@ const Lobby: React.FC<Props> = ({
             <span style={{ fontSize: '0.7rem', color: 'var(--muted)', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
               Room Code
             </span>
-            <motion.h1 
+            <motion.h1
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               onClick={handleCopy}
-              style={{ 
-                fontFamily: 'Nunito', fontWeight: 900, fontSize: '3.1rem', color: '#fff', 
+              style={{
+                fontFamily: 'Nunito', fontWeight: 900, fontSize: '3.1rem', color: '#fff',
                 letterSpacing: '0.15em', margin: '4px 0', cursor: 'pointer',
                 transition: 'color 0.2s'
               }}
@@ -152,8 +153,8 @@ const Lobby: React.FC<Props> = ({
               >
                 🎮 Start Game
               </button>
-              <button 
-                className="btn" 
+              <button
+                className="btn"
                 style={{ background: 'transparent', color: 'var(--muted)', fontSize: '0.8rem' }}
                 onClick={onLeaveRoom}
               >
@@ -201,11 +202,27 @@ const Lobby: React.FC<Props> = ({
         </motion.div>
 
         <h1 style={{ fontFamily: 'Nunito', fontWeight: 900, fontSize: '2.5rem', marginBottom: 6, background: 'linear-gradient(135deg,#a855f7,#ec4899)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-          HUNO Online
+          HUNO
         </h1>
         <p style={{ color: 'var(--muted)', fontSize: '0.95rem', marginBottom: 36, fontWeight: 600 }}>
           Real-time Team Multiplayer
         </p>
+
+        {/* Connection status */}
+        {!connected && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: [0.5, 1, 0.5] }}
+            transition={{ duration: 1.5, repeat: Infinity }}
+            style={{
+              background: 'rgba(253,216,53,0.1)', border: '1px solid rgba(253,216,53,0.3)',
+              borderRadius: 10, padding: '8px 14px', marginBottom: 16,
+              color: '#fdd835', fontSize: '0.82rem', fontWeight: 700,
+            }}
+          >
+            ⏳ Connecting to server...
+          </motion.div>
+        )}
 
         {error && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
@@ -220,6 +237,7 @@ const Lobby: React.FC<Props> = ({
             placeholder="Your username"
             value={username}
             onChange={e => setUsername(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && username.trim() && (mode === 'create' ? onCreateRoom(username) : mode === 'join' && joinCode.trim() && onJoinRoom(username, joinCode.trim()))}
             maxLength={20}
           />
         </div>
@@ -229,7 +247,7 @@ const Lobby: React.FC<Props> = ({
             <motion.div key="home" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
               initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
               <button className="btn btn-primary" style={{ width: '100%', padding: '14px' }}
-                onClick={() => setMode('create')}>
+                onClick={() => handle(() => setMode('create'))}>
                 🎮 Create Room
               </button>
               <button className="btn" style={{
@@ -244,7 +262,8 @@ const Lobby: React.FC<Props> = ({
           {mode === 'create' && (
             <motion.div key="create" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
               initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
-              <button className="btn btn-success" style={{ width: '100%', padding: '14px' }}
+              <button className="btn btn-primary" style={{ width: '100%', padding: '14px' }}
+                disabled={!connected}
                 onClick={() => handle(() => onCreateRoom(username))}>
                 ✨ Create My Room
               </button>
@@ -262,9 +281,12 @@ const Lobby: React.FC<Props> = ({
                 placeholder="Room code"
                 value={joinCode}
                 onChange={e => setJoinCode(e.target.value.trim().toUpperCase())}
+                onKeyDown={e => e.key === 'Enter' && username.trim() && joinCode.trim() && onJoinRoom(username, joinCode.trim())}
                 maxLength={6}
+                autoFocus
               />
               <button className="btn btn-primary" style={{ width: '100%', padding: '14px' }}
+                disabled={!connected}
                 onClick={() => handle(() => onJoinRoom(username, joinCode.trim()))}>
                 🚀 Join Game
               </button>
@@ -285,7 +307,7 @@ const Lobby: React.FC<Props> = ({
           gap: 12,
         }}>
           <p style={{ color: 'var(--muted)', fontSize: '0.75rem' }}>
-            +2  •  +4  •  +6  •  Skip  •  Reverse  •  Swap ✨
+            +2  •  +4  •  +6  •  Skip  •  Reverse  •  Swap ✨ . Harsh
           </p>
           <div style={{
             display: 'flex',
@@ -295,23 +317,23 @@ const Lobby: React.FC<Props> = ({
             opacity: 0.8
           }}>
             <p style={{ color: 'var(--muted)', fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.05em' }}>
-              © 2024 HUNO. ALL COPYRIGHT RESERVED.
+              © 2026 HUNO. ALL COPYRIGHT RESERVED.
             </p>
-            <a 
-              href="https://instagram.com/harsh_vm9281" 
-              target="_blank" 
+            <a
+              href="https://instagram.com/harsh_vm9281"
+              target="_blank"
               rel="noopener noreferrer"
-              style={{ 
-                color: 'var(--accent2)', 
-                fontSize: '0.7rem', 
-                fontWeight: 800, 
+              style={{
+                color: 'var(--accent2)',
+                fontSize: '0.7rem',
+                fontWeight: 800,
                 textDecoration: 'none',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 4
               }}
             >
-              <span>📸</span> Follow my Instagram: harsh_vm9281
+              <span>📸</span> Follow on Instagram: harsh_vm9281
             </a>
           </div>
         </div>
